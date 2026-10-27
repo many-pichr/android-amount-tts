@@ -103,7 +103,10 @@ calling coroutine stops playback.
 ### Export as WAV (no playback)
 
 `AmountAudioExporter` produces the same audio that `KhmerAmountSpeaker` plays: mono, 44.1 kHz, with
-the same trimming, gaps and fallback for missing compound clips. You can call it from any thread.
+the same trimming, gaps and fallback for missing compound clips. It returns that audio as a `.wav` file
+or as a `ByteArray` instead of playing it. Use it to send the audio to a payment terminal, cache it per
+transaction, attach it to a notification sound, or play it with your own audio stack. You can call it
+from any thread.
 
 ```kotlin
 val exporter = AmountAudioExporter(context)
@@ -120,6 +123,10 @@ val wav: ByteArray = exporter.wavData("1,250,000", CurrencyCode.KHR)
 
 // To a specific file
 exporter.writeWav("50,000", CurrencyCode.KHR, voiceType = VoiceType.RECEIVED, file = File(dir, "received.wav"))
+
+// From a prepared AmountSpeech
+val speech = AmountSpeech("25.50", CurrencyCode.USD, SpeechLanguage.ENGLISH, VoiceType.CONFIRM_PAY)
+val data = exporter.wavData(speech)
 
 // Options
 val custom = AmountAudioExporter(

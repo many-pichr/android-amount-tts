@@ -1,5 +1,7 @@
 package io.github.manypichr.khmeramountspeech
 
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.async
@@ -51,7 +53,19 @@ class DeviceAudioTest {
         assertTrue(sequence.duration > 1 && sequence.duration < 6) // ទទួលប្រាក់ចំនួន + ប្រាំម៉ឺន + រៀល
         val file = exporter.speechWav(speech)
         assertEquals(44L + sequence.samples.size * 2, file.length())
-        file.delete()
+
+        // The platform reads it back as mono 44.1 kHz audio.
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(file.absolutePath)
+            assertEquals(1, extractor.trackCount)
+            val format = extractor.getTrackFormat(0)
+            assertEquals(44_100, format.getInteger(MediaFormat.KEY_SAMPLE_RATE))
+            assertEquals(1, format.getInteger(MediaFormat.KEY_CHANNEL_COUNT))
+        } finally {
+            extractor.release()
+            file.delete()
+        }
     }
 
     @Test

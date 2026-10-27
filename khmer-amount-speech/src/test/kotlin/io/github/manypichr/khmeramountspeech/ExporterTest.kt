@@ -88,6 +88,13 @@ class ExporterTest {
     }
 
     @Test
+    fun inputConvenienceMatchesSpeech(): Unit = runBlocking {
+        val a = exporter().wavData("25.50", CurrencyCode.USD, SpeechLanguage.ENGLISH)
+        val b = exporter().wavData(AmountSpeech("25.50", CurrencyCode.USD, SpeechLanguage.ENGLISH))
+        assertArrayEquals(a, b)
+    }
+
+    @Test
     fun missingAudioFailsByDefault(): Unit = runBlocking {
         try {
             exporter(resolver = { null }).wavData("1,000", CurrencyCode.KHR)
