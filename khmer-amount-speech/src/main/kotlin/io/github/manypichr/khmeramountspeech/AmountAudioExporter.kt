@@ -5,6 +5,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Renders amounts to WAV audio without playing them — e.g. to send to a payment terminal,
@@ -17,6 +20,8 @@ import java.util.UUID
  * val exporter = AmountAudioExporter(context)
  * val wav: ByteArray = exporter.wavData("1,250,000", CurrencyCode.KHR)
  * exporter.writeWav("50,000", CurrencyCode.KHR, voiceType = VoiceType.RECEIVED, file = file)
+ *
+ * val louder = AmountAudioExporter(context, volume = 2f)                              // ≈ +6 dB
  * ```
  */
 public class AmountAudioExporter internal constructor(
@@ -27,7 +32,19 @@ public class AmountAudioExporter internal constructor(
     private val loader: ClipLoader,
     /** Default folder for [speechWav]: `<cacheDir>/KhmerAmountSpeech`. */
     public val defaultDirectory: File,
+    volume: Float = 1f,
+    /**
+     * When true (default), a boost is capped so the loudest sample just reaches full scale instead of
+     * clipping (distorting). When false, samples past full scale are clipped in [WavSampleFormat.PCM16] output.
+     */
+    public val preventClipping: Boolean = true,
 ) {
+    /**
+     * Linear gain applied to the exported audio: 1 = unchanged (default), 0.5 ≈ -6 dB, 2 ≈ +6 dB.
+     * Values above 1 boost the volume. Negative values are treated as 0.
+     */
+    public val volume: Float = volume.coerceAtLeast(0f)
+
     @JvmOverloads
     public constructor(
         context: Context,
@@ -35,10 +52,13 @@ public class AmountAudioExporter internal constructor(
         missingAssetPolicy: MissingAssetPolicy = MissingAssetPolicy.FAIL,
         sampleFormat: WavSampleFormat = WavSampleFormat.PCM16,
         resolver: AudioResolver = AudioResources.bundled(context),
+        volume: Float = 1f,
+        preventClipping: Boolean = true,
     ) : this(
         render, missingAssetPolicy, sampleFormat, resolver,
         ClipLoader(OUTPUT_SAMPLE_RATE, MediaCodecClipDecoder(context)),
         File(context.cacheDir, "KhmerAmountSpeech"),
+        volume, preventClipping,
     )
 
     // WAV data
@@ -120,9 +140,10 @@ public class AmountAudioExporter internal constructor(
 
     // Raw samples
 
-    /** The rendered utterance as mono Float samples, with the sample range of each token. */
+    /** The rendered utterance as mono Float samples (with [volume] applied), with the sample range of each token. */
     public suspend fun renderSequence(tokens: List<AudioToken>): RenderedSequence =
         composeUtterance(tokens, loader, render, missingAssetPolicy, resolver).sequence
+            .scaled(volume, preventClipping)
 
     private fun writeAtomically(file: File, data: ByteArray) {
         val temp = File(file.parentFile, ".${file.name}.${UUID.randomUUID()}.tmp")
@@ -136,4 +157,18 @@ public class AmountAudioExporter internal constructor(
             temp.delete()
         }
     }
+}
+
+/**
+ * The same sequence with every sample multiplied by [gain]. With [preventClipping], a gain above 1
+ * is reduced so the peak does not exceed full scale.
+ */
+internal fun RenderedSequence.scaled(gain: Float, preventClipping: Boolean): RenderedSequence {
+    var g = gain
+    if (preventClipping && g > 1f) {
+        val peak = samples.maxOfOrNull { abs(it) } ?: 0f
+        if (peak > 0f) g = min(g, max(1f, 1f / peak))
+    }
+    if (g == 1f) return this
+    return RenderedSequence(FloatArray(samples.size) { samples[it] * g }, sampleRate, segments)
 }

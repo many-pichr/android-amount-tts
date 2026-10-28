@@ -133,7 +133,13 @@ val custom = AmountAudioExporter(
     context,
     render = RenderOptions(gapMs = 20.0),        // the same timing options as playback
     sampleFormat = WavSampleFormat.FLOAT32,      // PCM16 (default, most compatible) or FLOAT32
+    volume = 1.5f,                               // linear gain: 1 = unchanged (default), 0.5 ≈ -6 dB, 2 ≈ +6 dB
 )
+
+// Boost the volume. By default the boost stops where the loudest sample reaches full scale, so the
+// audio gets louder without distorting. Pass preventClipping = false to apply the full gain and clip peaks.
+val louder = AmountAudioExporter(context, volume = 2f)
+val maxLoud = AmountAudioExporter(context, volume = 4f, preventClipping = false)
 
 // Raw samples, with each token's sample range
 val sequence = exporter.renderSequence(AmountSpeech("25.50", CurrencyCode.USD).tokens)

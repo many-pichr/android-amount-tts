@@ -3,6 +3,7 @@ package io.github.manypichr.khmeramountspeech
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -11,6 +12,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
 
 class ExporterTest {
     @get:Rule
@@ -23,10 +25,13 @@ class ExporterTest {
     private fun exporter(
         resolver: AudioResolver = AudioResolver { AudioSource.Asset(it.resourcePath) },
         format: WavSampleFormat = WavSampleFormat.PCM16,
+        volume: Float = 1f,
+        preventClipping: Boolean = true,
     ) = AmountAudioExporter(
         RenderOptions(), MissingAssetPolicy.FAIL, format, resolver,
         ClipLoader(OUTPUT_SAMPLE_RATE) { _, _ -> FloatArray(8_820) { 0.5f } },
         temp.root.resolve("default"),
+        volume, preventClipping,
     )
 
     @Test
@@ -92,6 +97,37 @@ class ExporterTest {
         val a = exporter().wavData("25.50", CurrencyCode.USD, SpeechLanguage.ENGLISH)
         val b = exporter().wavData(AmountSpeech("25.50", CurrencyCode.USD, SpeechLanguage.ENGLISH))
         assertArrayEquals(a, b)
+    }
+
+    @Test
+    fun scaledSequence() {
+        val sequence = RenderedSequence(floatArrayOf(0.25f, -0.5f), 44_100, emptyList())
+        assertArrayEquals(floatArrayOf(0.125f, -0.25f), sequence.scaled(0.5f, preventClipping = true).samples, 0f)
+        assertArrayEquals(floatArrayOf(1f, -2f), sequence.scaled(4f, preventClipping = false).samples, 0f)
+        // Boost is capped where the peak reaches full scale.
+        assertArrayEquals(floatArrayOf(0.5f, -1f), sequence.scaled(4f, preventClipping = true).samples, 0f)
+        assertArrayEquals(floatArrayOf(0.375f, -0.75f), sequence.scaled(1.5f, preventClipping = true).samples, 0f)
+    }
+
+    @Test
+    fun volumeScalesExportedAudio(): Unit = runBlocking {
+        val speech = AmountSpeech("50,000", CurrencyCode.KHR, voiceType = VoiceType.RECEIVED)
+        val normal = exporter().renderSequence(speech.tokens)
+        val quiet = exporter(volume = 0.5f).renderSequence(speech.tokens)
+        val loud = exporter(volume = 10f).renderSequence(speech.tokens)
+        val peak = { s: RenderedSequence -> s.samples.maxOf { abs(it) } }
+
+        assertEquals(normal.samples.size, quiet.samples.size)
+        assertEquals(normal.segments, quiet.segments)
+        assertEquals(peak(normal) * 0.5f, peak(quiet), 1e-6f)
+        assertTrue(peak(loud) > peak(normal))
+        assertTrue(peak(loud) <= 1.0001f)
+        assertEquals(0f, exporter(volume = -1f).volume)
+
+        val boosted = exporter(volume = 2f).wavData(speech)
+        val original = exporter().wavData(speech)
+        assertEquals(original.size, boosted.size)
+        assertFalse(boosted.contentEquals(original))
     }
 
     @Test
